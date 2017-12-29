@@ -14,11 +14,12 @@ The latest revision of this program may be found at:
 https://github.com/MichaelDipperstein/sockets
 
 ## Files
-echoclient.c    - TCP/IP echo client example using `getaddrinfo()` to find the
-                  server address
-echoserver.c    - TCP/IP echo server example with `select()` loop
-Makefile        - makefile for this project (assumes gcc compiler and GNU make)
-README.MD       - this file
+File Name | Contents
+--- | ---
+echoclient.c | TCP/IP echo client example using `getaddrinfo()` to find the server address
+echoserver.c | TCP/IP echo server example with `select()` loop
+Makefile     | makefile for this project (assumes gcc compiler and GNU make)
+README.MD    | this file
 
 ## Building
 To build these files with GNU make and gcc:
@@ -29,14 +30,24 @@ To build these files with GNU make and gcc:
 ## Usage
 
 ### echoserver
+echoserver &lt;port number&gt;
+
+The echoserver will not exit until `CTRL-c` is pressed.
 
 ### echoclient
+echoclient &lt;server address&gt; &lt;port number&gt;
+
+Hit `Enter` on a blank line to exit from an echoclient.
+
+Multiple `echoclient`s may connect to a single `echoserver` instant.
+
 ## History
 12/27/17  - Initial release
 
 ## TODO
 - Send and receive messages of any size
--
+- Apply timeout to client connect attempts
+- Add UDP versions of client and server
 
 ## BUGS
 - No known bugs
