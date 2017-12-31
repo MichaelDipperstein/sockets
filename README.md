@@ -16,8 +16,7 @@ https://michaeldipperstein.github.io/sockets.html
 ## Files
 File Name | Contents
 --- | ---
-echoclient.c | TCP/IP echo client example using `getaddrinfo()` to find the
-               server address
+echoclient.c | TCP/IP echo client example using `getaddrinfo()` to find the server address
 echoserver.c | TCP/IP echo server example with `select()` loop
 echoclient_udp.c | UDP/IP echo client example
 echoserver_udp.c | UDP/IP echo server example
