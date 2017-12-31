@@ -10,16 +10,19 @@ just about anywhere.
 
 These files are released under the BSD License.
 
-The latest revision of this program may be found at:
-https://github.com/MichaelDipperstein/sockets
+More information on run length encoding may be found at:
+https://michaeldipperstein.github.io/sockets.html
 
 ## Files
 File Name | Contents
 --- | ---
-echoclient.c | TCP/IP echo client example using `getaddrinfo()` to find the server address
+echoclient.c | TCP/IP echo client example using `getaddrinfo()` to find the
+               server address
 echoserver.c | TCP/IP echo server example with `select()` loop
-Makefile     | makefile for this project (assumes gcc compiler and GNU make)
-README.MD    | this file
+echoclient_udp.c | UDP/IP echo client example
+echoserver_udp.c | UDP/IP echo server example
+Makefile | makefile for this project (assumes gcc compiler and GNU make)
+README.MD | this file
 
 ## Building
 To build these files with GNU make and gcc:
@@ -28,26 +31,32 @@ To build these files with GNU make and gcc:
 3. Enter the command "make" from the command line.
 
 ## Usage
+**NOTE:** It is not possible to mix and match TCP and UDP client/server pairs.
 
-### echoserver
+### echoserver or echoserver_udp
 echoserver &lt;port number&gt;
 
-The echoserver will not exit until `CTRL-c` is pressed.
+echoserver_udp &lt;port number&gt;
 
-### echoclient
+The `echoserver` will not exit until `CTRL-c` is pressed.
+
+### echoclient or echoclient_udp
 echoclient &lt;server address&gt; &lt;port number&gt;
 
-Hit `Enter` on a blank line to exit from an echoclient.
+echoclient_udp &lt;server address&gt; &lt;port number&gt;
 
-Multiple `echoclient`s may connect to a single `echoserver` instant.
+Hit `Enter` on a blank line to exit from an `echoclient`.
+
+Multiple `echoclient`s may connect to a single `echoserver` instance.
 
 ## History
 12/27/17  - Initial release
+12/30/17  - Added UDP client and server examples
 
 ## TODO
 - Send and receive messages of any size
 - Apply timeout to client connect attempts
-- Add UDP versions of client and server
+- Add support for IPv6
 
 ## BUGS
 - No known bugs

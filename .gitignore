@@ -1,3 +1,5 @@
 echoserver
 echoclient
+echoserver_udp
+echoclient_udp
 *.o

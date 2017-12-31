@@ -35,7 +35,7 @@ LD = gcc
 CFLAGS = -O3 -Wall -Wextra -pedantic -c
 LDFLAGS = -O3 -o
 
-PROGS = echoserver echoclient
+PROGS = echoserver echoclient echoserver_udp echoclient_udp
 
 all:		$(PROGS)
 
@@ -49,6 +49,18 @@ echoclient:	echoclient.o
 		$(LD) $< $(LDFLAGS) $@
 
 echoclient.o:	echoclient.c
+		$(CC) $(CFLAGS) $<
+
+echoserver_udp:	echoserver_udp.o
+		$(LD) $< $(LDFLAGS) $@
+
+echoserver_udp.o:	echoserver_udp.c
+		$(CC) $(CFLAGS) $<
+
+echoclient_udp:	echoclient_udp.o
+		$(LD) $< $(LDFLAGS) $@
+
+echoclient_udp.o:	echoclient_udp.c
 		$(CC) $(CFLAGS) $<
 
 
