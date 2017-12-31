@@ -133,6 +133,7 @@ int main(int argc, char *argv[])
     {
         /* bind failed */
         perror("Error binding socket");
+        close(serverFD);
         exit(EXIT_FAILURE);
     }
 
@@ -213,6 +214,7 @@ int main(int argc, char *argv[])
         }
     }
 
+    close(serverFD);
     return EXIT_SUCCESS;    /* we should not get here */
 }
 
