@@ -53,8 +53,8 @@
 
 #include <sys/types.h>
 #include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
+
+#include <netdb.h>
 
 /***************************************************************************
 *                                CONSTANTS
@@ -64,7 +64,8 @@
 /***************************************************************************
 *                               PROTOTYPES
 ***************************************************************************/
-int DoEchoClient(const int socketFD, struct sockaddr_in *serverAddr);
+int DoEchoClient(const int socketFD, struct sockaddr *serverAddr,
+    const unsigned int addrLen);
 
 /***************************************************************************
 *                                FUNCTIONS
@@ -88,9 +89,13 @@ int main(int argc, char **argv)
     int result;
     int socketFD;               /* UDP socket descriptor */
 
-    struct sockaddr_in serverAddr;
+    struct sockaddr *serverAddr;    /* structure containing the server address */
+    unsigned int addrLen;           /* size of struct sockaddr */
 
-    unsigned int addrLen;       /* size of struct sockaddr_in */
+    /* structures for use with getaddrinfo() */
+    struct addrinfo hints;      /* hints for getaddrinfo() */
+    struct addrinfo *servInfo;  /* list of info returned by getaddrinfo() */
+    struct addrinfo *p;         /* pointer for iterating list in servInfo */
 
     /* argv[1] is host name, argv[2] is port number, make sure we have them */
     if (argc != 3)
@@ -99,34 +104,58 @@ int main(int argc, char **argv)
         exit(EXIT_FAILURE);
     }
 
-    /* create server socket descriptor */
-    socketFD = socket(PF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    memset(&hints, 0, sizeof(hints));
 
-    if (socketFD < 0)
+    /* type of server we're looking for */
+    hints.ai_family = AF_INET;          /* internet address family */
+    hints.ai_socktype = SOCK_DGRAM;     /* datagram sock */
+    hints.ai_protocol = IPPROTO_UDP;    /* udp/ip protocol */
+    hints.ai_flags = AI_CANONNAME;      /* include canonical name */
+
+    /* get a linked list of likely servers pointed to by servInfo */
+    result = getaddrinfo(argv[1], argv[2], &hints, &servInfo);
+
+    if (result != 0)
     {
-        perror("Error creating socket");
+        fprintf(stderr, "Error getting addrinfo: %s\n", gai_strerror(result));
         exit(EXIT_FAILURE);
     }
 
-    addrLen = sizeof(serverAddr);
-    memset(&serverAddr, 0, addrLen);                /* clear data structure */
+    printf("Trying %s...\n", argv[1]);
+    p = servInfo;
 
-    /* allow internet data from any address on port argv[1] */
-    serverAddr.sin_family = AF_INET;                /* internet address family */
-    serverAddr.sin_port = htons(atoi(argv[2]));     /* port number */
-
-    result = inet_aton(argv[1], &serverAddr.sin_addr);
-
-    if (0 == result)
+    while (p != NULL)
     {
-        fprintf(stderr, "Error obtaining Internet address of %s\n", argv[1]);
-        close(socketFD);
+        /* use current info to create a socket */
+        socketFD = socket(p->ai_family, p->ai_socktype, p->ai_protocol);
+
+        if (socketFD >= 0)
+        {
+            /* we succeeded in getting a socket get out of this loop */
+            break;
+        }
+
+        p = p->ai_next;     /* try next address */
+    }
+
+    if (NULL == p)
+    {
+        /* we never found a server to connect to */
+        fprintf(stderr, "Unable to connect to server\n.");
+        freeaddrinfo(servInfo);
         exit(EXIT_FAILURE);
     }
+
+    addrLen = p->ai_addrlen;
+    serverAddr = (struct sockaddr *)malloc(addrLen);
+    memcpy(serverAddr, p->ai_addr, addrLen);
+
+    freeaddrinfo(servInfo);     /* we're done with servInfo */
 
     /* send and receive echo messages until user sends empty message */
-    while (DoEchoClient(socketFD, &serverAddr));
+    while (DoEchoClient(socketFD, serverAddr, addrLen));
 
+    free(serverAddr);
     close(socketFD);
     return 0;
 }
@@ -143,13 +172,11 @@ int main(int argc, char **argv)
 *                then the reply from socketFD is read and written to stdout.
 *   Returned   : 0 for empty message from stdin, otherwise 1.
 ***************************************************************************/
-int DoEchoClient(const int socketFD, struct sockaddr_in *serverAddr)
+int DoEchoClient(const int socketFD, struct sockaddr *serverAddr,
+    const unsigned int addrLen)
 {
     int result;
     char buffer[BUF_SIZE + 1];  /* stores received message */
-    unsigned int addrLen;       /* size of struct sockaddr_in */
-
-    addrLen = sizeof(struct sockaddr_in);
 
     /* get message line from the user */
     printf("Enter message to send [empty message exits]:\n");
@@ -163,8 +190,7 @@ int DoEchoClient(const int socketFD, struct sockaddr_in *serverAddr)
     }
 
     /* send the message line to the server */
-    result = sendto(socketFD, buffer, strlen(buffer), 0,
-        (struct sockaddr *)serverAddr, addrLen);
+    result = sendto(socketFD, buffer, strlen(buffer), 0, serverAddr, addrLen);
 
     if (result < 0)
     {
