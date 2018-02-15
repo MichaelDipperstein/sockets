@@ -149,18 +149,18 @@ int main(int argc, char *argv[])
 ***************************************************************************/
 int DoEcho(const int serverFD)
 {
-    struct sockaddr_in clinetAddr;      /* address that sent the packet */
+    struct sockaddr_in clientAddr;      /* address that sent the packet */
     unsigned int addrLen;               /* size of struct sockaddr_in */
     char buffer[BUF_SIZE + 1];          /* stores received message */
     int result;
 
     addrLen = sizeof(struct sockaddr_in);
-    memset(&clinetAddr, 0, addrLen);    /* clear data structure */
+    memset(&clientAddr, 0, addrLen);    /* clear data structure */
 
     printf("Waiting to receive a message.\n");
     memset(&buffer, 0, BUF_SIZE);
     result = recvfrom(serverFD, buffer, BUF_SIZE, 0,
-        (struct sockaddr *)&clinetAddr, &addrLen);
+        (struct sockaddr *)&clientAddr, &addrLen);
 
     if (result < 0)
     {
@@ -169,16 +169,16 @@ int DoEcho(const int serverFD)
     else if (0 == result)
     {
         printf("Orderly shutdown by %s.\n",
-            inet_ntoa(clinetAddr.sin_addr));
+            inet_ntoa(clientAddr.sin_addr));
     }
     else
     {
         /* we received a valid message */
         printf("Received %d bytes from %s.\n", result,
-            inet_ntoa(clinetAddr.sin_addr));
+            inet_ntoa(clientAddr.sin_addr));
 
         result = sendto(serverFD, buffer, strlen(buffer), 0,
-            (struct sockaddr *)&clinetAddr, addrLen);
+            (struct sockaddr *)&clientAddr, addrLen);
 
         if (result < 0)
         {

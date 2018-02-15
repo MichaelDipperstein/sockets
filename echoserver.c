@@ -91,9 +91,9 @@ int main(int argc, char *argv[])
 
     /* structures for server and client internet addresses */
     struct sockaddr_in serverAddr;
-    struct sockaddr_in clinetAddr;
+    struct sockaddr_in clientAddr;
 
-    unsigned int addrLen;   /* size of clinetAddr */
+    unsigned int addrLen;   /* size of clientAddr */
 
 
     /* sets of file descriptors for select functions */
@@ -174,10 +174,10 @@ int main(int argc, char *argv[])
                 if (i == serverFD)
                 {
                     /* we got a new connection */
-                    addrLen = sizeof(clinetAddr);
+                    addrLen = sizeof(clientAddr);
 
                     clientFD = accept(serverFD,
-                        (struct sockaddr *)&clinetAddr,  &addrLen);
+                        (struct sockaddr *)&clientAddr,  &addrLen);
 
                     if (clientFD < 0)
                     {
@@ -195,7 +195,7 @@ int main(int argc, char *argv[])
                         }
 
                         printf("Connected to %s on socket %d.\n",
-                            inet_ntoa(clinetAddr.sin_addr), clientFD);
+                            inet_ntoa(clientAddr.sin_addr), clientFD);
                     }
                 }
                 else
