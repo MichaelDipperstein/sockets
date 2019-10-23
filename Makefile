@@ -1,7 +1,7 @@
 ############################################################################
 # Makefile for Berkeley Socket Examples
 ############################################################################
-# Copyright (C) 2017 by Michael Dipperstein (mdipper@alumni.engr.ucsb.edu)
+# Copyright (C) 2017 by Michael Dipperstein (mdipperstein@gmail.com)
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions are met:

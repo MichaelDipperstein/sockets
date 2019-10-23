@@ -61,4 +61,4 @@ Multiple `echoclient`s may connect to a single `echoserver` instance.
 - No known bugs
 
 ## AUTHOR
-Michael Dipperstein (mdipper@alumni.engr.ucsb.edu)
+Michael Dipperstein (mdipperstein@gmail.com)
