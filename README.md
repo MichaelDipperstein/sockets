@@ -40,17 +40,19 @@ echoserver_udp &lt;port number&gt;
 The `echoserver` will not exit until `CTRL-c` is pressed.
 
 ### echoclient or echoclient_udp
-echoclient &lt;server address&gt; &lt;port number&gt;
+echoclient &lt;server hostname or address&gt; &lt;port number&gt;
 
-echoclient_udp &lt;server address&gt; &lt;port number&gt;
+echoclient_udp &lt;server hostname or address&gt; &lt;port number&gt;
 
 Hit `Enter` on a blank line to exit from an `echoclient`.
 
 Multiple `echoclient`s may connect to a single `echoserver` instance.
 
 ## History
-12/27/17  - Initial release
-12/30/17  - Added UDP client and server examples
+12/27/17  - Initial release<br/>
+12/30/17  - Added UDP client and server examples<br/>
+08/08/20  - Added polling and signal handling to allow UDP examples
+            to exit cleanly when waiting to receive data
 
 ## TODO
 - Send and receive messages of any size

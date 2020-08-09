@@ -54,6 +54,11 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 
+#include <signal.h>
+#include <sys/signalfd.h>
+
+#include <poll.h>
+
 #include <netdb.h>
 
 /***************************************************************************
@@ -64,7 +69,7 @@
 /***************************************************************************
 *                               PROTOTYPES
 ***************************************************************************/
-int DoEchoClient(const int socketFD, struct sockaddr *serverAddr,
+int DoEchoClient(const int socketFd, struct sockaddr *serverAddr,
     const unsigned int addrLen);
 
 /***************************************************************************
@@ -87,9 +92,10 @@ int DoEchoClient(const int socketFD, struct sockaddr *serverAddr,
 int main(int argc, char **argv)
 {
     int result;
-    int socketFD;               /* UDP socket descriptor */
+    int socketFd;               /* UDP socket descriptor */
 
-    struct sockaddr *serverAddr;    /* structure containing the server address */
+    /* structure containing the server's internet address */
+    struct sockaddr *serverAddr;
     unsigned int addrLen;           /* size of struct sockaddr */
 
     /* structures for use with getaddrinfo() */
@@ -97,10 +103,13 @@ int main(int argc, char **argv)
     struct addrinfo *servInfo;  /* list of info returned by getaddrinfo() */
     struct addrinfo *p;         /* pointer for iterating list in servInfo */
 
-    /* argv[1] is host name, argv[2] is port number, make sure we have them */
+    /* argv[1] is host name or address, argv[2] is port number,
+     * make sure we have them */
     if (argc != 3)
     {
-        fprintf(stderr, "Usage:  %s <host name> <port number>\n", argv[0]);
+        fprintf(stderr,
+            "Usage:  %s <server hostname or address> <port number>\n",
+            argv[0]);
         exit(EXIT_FAILURE);
     }
 
@@ -127,9 +136,9 @@ int main(int argc, char **argv)
     while (p != NULL)
     {
         /* use current info to create a socket */
-        socketFD = socket(p->ai_family, p->ai_socktype, p->ai_protocol);
+        socketFd = socket(p->ai_family, p->ai_socktype, p->ai_protocol);
 
-        if (socketFD >= 0)
+        if (socketFd >= 0)
         {
             /* we succeeded in getting a socket get out of this loop */
             break;
@@ -146,6 +155,7 @@ int main(int argc, char **argv)
         exit(EXIT_FAILURE);
     }
 
+    /* copy the server address that we created a socket for */
     addrLen = p->ai_addrlen;
     serverAddr = (struct sockaddr *)malloc(addrLen);
     memcpy(serverAddr, p->ai_addr, addrLen);
@@ -153,10 +163,10 @@ int main(int argc, char **argv)
     freeaddrinfo(servInfo);     /* we're done with servInfo */
 
     /* send and receive echo messages until user sends empty message */
-    while (DoEchoClient(socketFD, serverAddr, addrLen));
+    while (DoEchoClient(socketFd, serverAddr, addrLen));
 
     free(serverAddr);
-    close(socketFD);
+    close(socketFd);
     return 0;
 }
 
@@ -166,17 +176,23 @@ int main(int argc, char **argv)
 *                server's socket, waits for a reply from the server, and
 *                writes it to stdout.  If an empty message is received from
 *                stdin, this routine will exit without transmitting it.
-*   Parameters : socketFD - The socket descriptor for the socket to be read
+*   Parameters : socketFd - The socket descriptor for the socket to be read
 *                from and echoed to.
-*   Effects    : stdin is read for a messages, which is sent to socketFD
-*                then the reply from socketFD is read and written to stdout.
+*   Effects    : stdin is read for a messages, which is sent to socketFd
+*                then the reply from socketFd is read and written to stdout.
 *   Returned   : 0 for empty message from stdin, otherwise 1.
 ***************************************************************************/
-int DoEchoClient(const int socketFD, struct sockaddr *serverAddr,
+int DoEchoClient(const int socketFd, struct sockaddr *serverAddr,
     const unsigned int addrLen)
 {
     int result;
     char buffer[BUF_SIZE + 1];  /* stores received message */
+
+    /* we'll need these to handle ctrl-c, ctrl-\ while trying to recv */
+    sigset_t mask, oldMask;
+    int signalFd;
+
+    struct pollfd pfds[2];      /* poll for socket recv and signal */
 
     /* get message line from the user */
     printf("Enter message to send [empty message exits]:\n");
@@ -190,7 +206,7 @@ int DoEchoClient(const int socketFD, struct sockaddr *serverAddr,
     }
 
     /* send the message line to the server */
-    result = sendto(socketFD, buffer, strlen(buffer), 0, serverAddr, addrLen);
+    result = sendto(socketFd, buffer, strlen(buffer), 0, serverAddr, addrLen);
 
     if (result < 0)
     {
@@ -198,15 +214,68 @@ int DoEchoClient(const int socketFD, struct sockaddr *serverAddr,
         return 1;
     }
 
-    /* print the server's reply */
-    result = recvfrom(socketFD, buffer, BUF_SIZE, 0, NULL, NULL);
+    /* mask ctrl-c and ctrl-\ */
+    sigemptyset(&mask);
+    sigaddset(&mask, SIGINT);
+    sigaddset(&mask, SIGQUIT);
 
-    if (result < 0)
+    /* block ctrl-c and ctrl-\ signals so that can be signaled
+     * signaled by the signalFd and handled while polling. */
+    if (sigprocmask(SIG_BLOCK, &mask, &oldMask) == -1)
     {
-        perror("Error receiving echo");
-        return 1;
+        perror("Error setting sigproc mask");
+        return 0;
     }
 
-    printf("Received:\n%s", buffer);
-    return 1;
+    signalFd = signalfd(-1, &mask, 0);
+
+    if (signalFd == -1)
+    {
+        perror("Error creating signal fd");
+        sigprocmask(SIG_UNBLOCK, &mask, NULL);
+        sigprocmask(SIG_BLOCK, &oldMask, NULL);
+        return 0;
+    }
+
+    pfds[0].fd = socketFd;
+    pfds[0].events = POLLIN;
+
+    pfds[1].fd = signalFd;
+    pfds[1].events = POLLIN;
+
+    printf("Waiting for echo [ctrl-c exits]:\n");
+    poll(pfds, 2, -1);  /* block with poll until 1 of 2 events */
+
+    /* handle signals first */
+    if (pfds[1].revents & POLLIN)
+    {
+        /* SIGINT or SIGQUIT clean-up and get out of here */
+        sigprocmask(SIG_UNBLOCK, &mask, NULL);
+        sigprocmask(SIG_BLOCK, &oldMask, NULL);
+        close(signalFd);
+        return 0;       /* zero will cause main to exit */
+    }
+
+    /* now check for recv on socket */
+    if (pfds[0].revents & POLLIN)
+    {
+        /* get the server's reply (recv actually accepts all replies) */
+        result = recv(socketFd, buffer, BUF_SIZE, 0);
+
+        if (result < 0)
+        {
+            perror("Error receiving echo");
+            result = 1;     /* allow main loop to do another echo */
+        }
+        else
+        {
+            printf("Received:\n%s", buffer);
+        }
+    }
+
+    /* clean-up signal mask */
+    sigprocmask(SIG_UNBLOCK, &mask, NULL);
+    sigprocmask(SIG_BLOCK, &oldMask, NULL);
+    close(signalFd);
+    return result;
 }

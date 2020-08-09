@@ -54,6 +54,11 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
 
+#include <signal.h>
+#include <sys/signalfd.h>
+
+#include <poll.h>
+
 /***************************************************************************
 *                                CONSTANTS
 ***************************************************************************/
@@ -79,16 +84,15 @@ int DoEcho(const int clientFD);
 *                argv - parameter list (argv[1] is port number)
 *   Effects    : A socket is open and accepts all data on the specified
 *                port.
-*   Returned   : This function should never return
+*   Returned   : EXIT_SUCCESS on success, otherwise EXIT_FAILURE.
 ***************************************************************************/
 int main(int argc, char *argv[])
 {
     int result;
-    int serverFD;           /* server's socket descriptor */
+    int socketFd;               /* server's socket descriptor */
 
-    /* structures for server and client internet addresses */
-    struct sockaddr_in serverAddr;
-
+    /* structure for echo server internet addresses */
+    struct sockaddr_in socketAddr;
     unsigned int addrLen;       /* size of struct sockaddr_in */
 
     /* argv[1] is port number, make sure it's passed to us */
@@ -99,92 +103,156 @@ int main(int argc, char *argv[])
     }
 
     /* create server socket descriptor */
-    serverFD = socket(PF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    socketFd = socket(PF_INET, SOCK_DGRAM, IPPROTO_UDP);
 
-    if (serverFD < 0)
+    if (socketFd < 0)
     {
         perror("Error creating socket");
         exit(EXIT_FAILURE);
     }
 
-    addrLen = sizeof(serverAddr);
-    memset(&serverAddr, 0, addrLen);                /* clear data structure */
+    addrLen = sizeof(socketAddr);
+    memset(&socketAddr, 0, addrLen);                /* clear data structure */
 
     /* allow internet data from any address on port argv[1] */
-    serverAddr.sin_family = AF_INET;                /* internet address family */
-    serverAddr.sin_addr.s_addr = htonl(INADDR_ANY); /* any incoming address */
-    serverAddr.sin_port = htons(atoi(argv[1]));     /* port number */
+    socketAddr.sin_family = AF_INET;                /* internet addr family */
+    socketAddr.sin_addr.s_addr = htonl(INADDR_ANY); /* any incoming address */
+    socketAddr.sin_port = htons(atoi(argv[1]));     /* port number */
 
-    /* bind to the local address */
-    result = bind(serverFD, (struct sockaddr *)&serverAddr, addrLen);
+    /* bind the socket to the local address */
+    result = bind(socketFd, (struct sockaddr *)&socketAddr, addrLen);
 
     if (result < 0)
     {
         /* bind failed */
         perror("Error binding socket");
-        close(serverFD);
+        close(socketFd);
         exit(EXIT_FAILURE);
     }
 
-    /* we have a good socket, echo all received packets */
-    while (1)
+    /* we have a good socket bound to a port, echo all received packets */
+    while (DoEcho(socketFd) > 0);
+
+    close(socketFd);
+
+    if (result < 0)
     {
-        DoEcho(serverFD);
+        return EXIT_FAILURE;
     }
 
-    close(serverFD);
-    return EXIT_SUCCESS;    /* we should not get here */
+    return EXIT_SUCCESS;
 }
+
 
 /***************************************************************************
 *   Function   : DoEcho
 *   Description: This routine receives a packet from a UDP socket and then
 *                writes the received packet back to the address that it
 *                received from on the same socket.
-*   Parameters : serverFD - The socket descriptor for the socket to be read
+*   Parameters : socketFd - The socket descriptor for the socket to be read
 *                from and echoed to.
-*   Effects    : serverFD is read from and the values read are echoed back.
+*   Effects    : socketFd is read from and the values read are echoed back.
 *   Returned   : Typically the size of the echoed message.  Values <= 0
 *                mean something went wrong.
 ***************************************************************************/
-int DoEcho(const int serverFD)
+int DoEcho(const int socketFd)
 {
     struct sockaddr_in clientAddr;      /* address that sent the packet */
     unsigned int addrLen;               /* size of struct sockaddr_in */
     char buffer[BUF_SIZE + 1];          /* stores received message */
     int result;
 
+    /* we'll need these to handle ctrl-c, ctrl-\ while trying to recv */
+    sigset_t mask, oldMask;
+    int signalFd;
+
+    struct pollfd pfds[2];      /* poll for socket recv and signal */
+
     addrLen = sizeof(struct sockaddr_in);
     memset(&clientAddr, 0, addrLen);    /* clear data structure */
 
-    printf("Waiting to receive a message.\n");
+    /* mask ctrl-c and ctrl-\ */
+    sigemptyset(&mask);
+    sigaddset(&mask, SIGINT);
+    sigaddset(&mask, SIGQUIT);
+
+    /* block ctrl-c and ctrl-\ signals so that can be signaled
+     * signaled by the signalFd and handled while polling. */
+    if (sigprocmask(SIG_BLOCK, &mask, &oldMask) == -1)
+    {
+        perror("Error setting sigproc mask");
+        return 0;
+    }
+
+    signalFd = signalfd(-1, &mask, 0);
+
+    if (signalFd == -1)
+    {
+        perror("Error creating signal fd");
+        sigprocmask(SIG_UNBLOCK, &mask, NULL);
+        sigprocmask(SIG_BLOCK, &oldMask, NULL);
+        return 0;
+    }
+
+    pfds[0].fd = socketFd;
+    pfds[0].events = POLLIN;
+
+    pfds[1].fd = signalFd;
+    pfds[1].events = POLLIN;
+
+    printf("Waiting to receive a message [ctrl-c exits]:\n");
     memset(&buffer, 0, BUF_SIZE);
-    result = recvfrom(serverFD, buffer, BUF_SIZE, 0,
-        (struct sockaddr *)&clientAddr, &addrLen);
+    result = 0;
 
-    if (result < 0)
-    {
-        perror("Error receiving message");
-    }
-    else if (0 == result)
-    {
-        printf("Orderly shutdown by %s.\n",
-            inet_ntoa(clientAddr.sin_addr));
-    }
-    else
-    {
-        /* we received a valid message */
-        printf("Received %d bytes from %s.\n", result,
-            inet_ntoa(clientAddr.sin_addr));
+    poll(pfds, 2, -1);  /* block with poll until 1 of 2 events */
 
-        result = sendto(serverFD, buffer, strlen(buffer), 0,
-            (struct sockaddr *)&clientAddr, addrLen);
+    /* handle signals first */
+    if (pfds[1].revents & POLLIN)
+    {
+        /* SIGINT or SIGQUIT clean-up and get out of here */
+        sigprocmask(SIG_UNBLOCK, &mask, NULL);
+        sigprocmask(SIG_BLOCK, &oldMask, NULL);
+        close(signalFd);
+        return 0;       /* zero will cause main to exit */
+    }
+
+    /* now check for recvfrom on socket */
+    if (pfds[0].revents & POLLIN)
+    {
+        /* use recvfrom so we can know where the data came from */
+        result = recvfrom(socketFd, buffer, BUF_SIZE, 0,
+            (struct sockaddr *)&clientAddr, &addrLen);
 
         if (result < 0)
         {
-            perror("Error sending message");
+            perror("Error receiving message");
+        }
+        else if (0 == result)
+        {
+            /* this should never happen with udp */
+            printf("??? recvfrom returned 0.  Not valid for udp socket\n");
+        }
+        else
+        {
+            /* we received a valid message */
+            printf("Received message from %s:\n",
+                inet_ntoa(clientAddr.sin_addr));
+
+            printf("%s", buffer);
+
+            result = sendto(socketFd, buffer, strlen(buffer), 0,
+                (struct sockaddr *)&clientAddr, addrLen);
+
+            if (result < 0)
+            {
+                perror("Error sending message");
+            }
         }
     }
 
+    /* clean-up signal mask */
+    sigprocmask(SIG_UNBLOCK, &mask, NULL);
+    sigprocmask(SIG_BLOCK, &oldMask, NULL);
+    close(signalFd);
     return result;
 }
