@@ -64,7 +64,7 @@
 /***************************************************************************
 *                               PROTOTYPES
 ***************************************************************************/
-int DoEchoClient(const int serverFD);
+int DoEchoClient(const int socketFd);
 
 /***************************************************************************
 *                                FUNCTIONS
@@ -86,7 +86,7 @@ int DoEchoClient(const int serverFD);
 int main(int argc, char **argv)
 {
     int result;
-    int serverFD;               /* server's socket descriptor */
+    int socketFd;               /* TCP/IP socket descriptor */
 
     /* structures for use with getaddrinfo() */
     struct addrinfo hints;      /* hints for getaddrinfo() */
@@ -96,7 +96,9 @@ int main(int argc, char **argv)
     /* argv[1] is host name, argv[2] is port number, make sure we have them */
     if (argc != 3)
     {
-        fprintf(stderr, "Usage:  %s <host name> <port number>\n", argv[0]);
+        fprintf(stderr,
+            "Usage:  %s <server hostname or address> <port number>\n",
+            argv[0]);
         exit(EXIT_FAILURE);
     }
 
@@ -124,23 +126,23 @@ int main(int argc, char **argv)
     while (p != NULL)
     {
         /* use current info to create a socket */
-        serverFD = socket(p->ai_family, p->ai_socktype, p->ai_protocol);
+        socketFd = socket(p->ai_family, p->ai_socktype, p->ai_protocol);
 
-        if (serverFD >= 0)
+        if (socketFd >= 0)
         {
             /***************************************************************
             * We got the socket we asked for try to connect.
             *
-            * NOTE: connect() has an unspecified time out.  A good
-            * see http://developerweb.net/viewtopic.php?id=3196 for
-            * a sample of connecting with a timeout.
+            * NOTE: connect() has an unspecified time out.  For a good
+            * a sample of connecting with a timeout see
+            * http://developerweb.net/viewtopic.php?id=3196 for
             ***************************************************************/
-            result = connect(serverFD, p->ai_addr, p->ai_addrlen);
+            result = connect(socketFd, p->ai_addr, p->ai_addrlen);
 
             if (result != 0)
             {
                 /* this socket wouldn't except our connection */
-                close(serverFD);
+                close(socketFd);
             }
             else
             {
@@ -155,7 +157,7 @@ int main(int argc, char **argv)
     if (NULL == p)
     {
         /* we never found a server to connect to */
-        fprintf(stderr, "Unable to connect to server\n.");
+        fprintf(stderr, "Unable to connect to server.\n");
         freeaddrinfo(servInfo);
         exit(EXIT_FAILURE);
     }
@@ -164,9 +166,9 @@ int main(int argc, char **argv)
     freeaddrinfo(servInfo);     /* we're done with this */
 
     /* send and receive echo messages until user sends empty message */
-    while (DoEchoClient(serverFD));
+    while (DoEchoClient(socketFd));
 
-    close(serverFD);
+    close(socketFd);
     return 0;
 }
 
@@ -176,13 +178,14 @@ int main(int argc, char **argv)
 *                server's socket, waits for a reply from the server, and
 *                writes it to stdout.  If an empty message is received from
 *                stdin, this routine will exit without transmitting it.
-*   Parameters : serverFD - The socket descriptor for the socket to be read
+*   Parameters : socketFd - The socket descriptor for the socket to be read
 *                from and echoed to.
-*   Effects    : stdin is read for a messages, which is sent to serverFD
-*                then the reply from serverFD is read and written to stdout.
-*   Returned   : 0 for empty message from stdin, otherwise 1.
+*   Effects    : stdin is read for a messages, which is sent to socketFd
+*                then the reply from socketFd is read and written to stdout.
+*   Returned   : 0 for empty message from stdin or closed socket,
+*                otherwise 1.
 ***************************************************************************/
-int DoEchoClient(const int serverFD)
+int DoEchoClient(const int socketFd)
 {
     int result;
     char buffer[BUF_SIZE + 1];  /* stores received message */
@@ -199,7 +202,7 @@ int DoEchoClient(const int serverFD)
     }
 
     /* send the message line to the server */
-    result = write(serverFD, buffer, strlen(buffer));
+    result = write(socketFd, buffer, strlen(buffer));
 
     if (result != (int)strlen(buffer))
     {
@@ -208,11 +211,17 @@ int DoEchoClient(const int serverFD)
 
     /* print the server's reply */
     memset(&buffer, 0, sizeof(char) * BUF_SIZE);
-    result = read(serverFD, buffer, BUF_SIZE);
+    result = read(socketFd, buffer, BUF_SIZE);
 
     if (result < 0)
     {
         perror("Error receiving echo");
+    }
+    else if (0 == result)
+    {
+        /* the server side of the */
+        printf("Server closed connection.  Exiting ...\n");
+        return 0;
     }
 
     printf("Received:\n%s", buffer);
