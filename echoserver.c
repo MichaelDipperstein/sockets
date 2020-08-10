@@ -65,7 +65,7 @@
 /***************************************************************************
 *                               PROTOTYPES
 ***************************************************************************/
-int DoEcho(const int clientFD);
+int DoEcho(const int clientFd);
 
 /***************************************************************************
 *                                FUNCTIONS
@@ -86,15 +86,10 @@ int DoEcho(const int clientFD);
 int main(int argc, char *argv[])
 {
     int result;
-    int serverFD;           /* server's socket descriptor */
-    int clientFD;           /* client's socket descriptor */
+    int listenFd;   /* socket fd used to listen for connection requests */
 
     /* structures for server and client internet addresses */
     struct sockaddr_in serverAddr;
-    struct sockaddr_in clientAddr;
-
-    unsigned int addrLen;   /* size of clientAddr */
-
 
     /* sets of file descriptors for select functions */
     fd_set fdActiveSet;     /* all active fds */
@@ -111,9 +106,9 @@ int main(int argc, char *argv[])
     }
 
     /* create server socket descriptor */
-    serverFD = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP);
+    listenFd = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP);
 
-    if (serverFD < 0)
+    if (listenFd < 0)
     {
         perror("Error creating socket");
         exit(EXIT_FAILURE);
@@ -127,18 +122,18 @@ int main(int argc, char *argv[])
     serverAddr.sin_port = htons(atoi(argv[1]));     /* port number */
 
     /* bind to the local address */
-    result = bind(serverFD, (struct sockaddr *)&serverAddr, sizeof(serverAddr));
+    result = bind(listenFd, (struct sockaddr *)&serverAddr, sizeof(serverAddr));
 
     if (result < 0)
     {
         /* bind failed */
         perror("Error binding socket");
-        close(serverFD);
+        close(listenFd);
         exit(EXIT_FAILURE);
     }
 
     /* listen for incoming connections */
-    result = listen(serverFD, MAX_BACKLOG);
+    result = listen(listenFd, MAX_BACKLOG);
 
     if (result < 0)
     {
@@ -147,11 +142,10 @@ int main(int argc, char *argv[])
         exit(EXIT_FAILURE);
     }
 
-
     FD_ZERO(&fdActiveSet);              /* clear set of fds*/
-    FD_SET(serverFD, &fdActiveSet);     /* add server fd to the set */
+    FD_SET(listenFd, &fdActiveSet);     /* add server fd to the set */
 
-    fdMax = serverFD;   /* serverFD is the only fd, so it's the largest */
+    fdMax = listenFd;   /* listenFd is the only fd, so it's the largest */
 
     /* service all sockets as needed */
     while (1)
@@ -171,31 +165,30 @@ int main(int argc, char *argv[])
             if (FD_ISSET(i, &fdReadSet))
             {
                 /* this fd needs servicing.  figure out which one it is. */
-                if (i == serverFD)
+                if (i == listenFd)
                 {
-                    /* we got a new connection */
-                    addrLen = sizeof(clientAddr);
+                    /* we got a new connection request */
+                    int acceptedFd;     /* fd for accepted connection */
 
-                    clientFD = accept(serverFD,
-                        (struct sockaddr *)&clientAddr,  &addrLen);
+                    /* accept the connection; we don't care about the address */
+                    acceptedFd = accept(listenFd, NULL, NULL);
 
-                    if (clientFD < 0)
+                    if (acceptedFd < 0)
                     {
                         /* accept failed.  keep processing */
                         perror("Error accepting connections");
                     }
                     else
                     {
-                        /* add clientFD to set of fds*/
-                        FD_SET(clientFD, &fdActiveSet);
+                        /* add acceptedFd to set of fds*/
+                        FD_SET(acceptedFd, &fdActiveSet);
 
-                        if (clientFD > fdMax)
+                        if (acceptedFd > fdMax)
                         {
-                            fdMax = clientFD;
+                            fdMax = acceptedFd;
                         }
 
-                        printf("Connected to %s on socket %d.\n",
-                            inet_ntoa(clientAddr.sin_addr), clientFD);
+                        printf("New connection on socket %d.\n", acceptedFd);
                     }
                 }
                 else
@@ -214,7 +207,7 @@ int main(int argc, char *argv[])
         }
     }
 
-    close(serverFD);
+    close(listenFd);
     return EXIT_SUCCESS;    /* we should not get here */
 }
 
@@ -222,18 +215,18 @@ int main(int argc, char *argv[])
 *   Function   : DoEcho
 *   Description: This routine receives from a client's socket and then
 *                writes the received message back to the same socket.
-*   Parameters : clientFD - The socket descriptor for the socket to be read
+*   Parameters : clientFd - The socket descriptor for the socket to be read
 *                from and echoed to.
-*   Effects    : clientFD is read from and the values read are echoed back.
+*   Effects    : clientFd is read from and the values read are echoed back.
 *   Returned   : 0 for normal disconnect, < 0 for failure, otherwise the
 *                number of bytes read from the socket.
 ***************************************************************************/
-int DoEcho(const int clientFD)
+int DoEcho(const int clientFd)
 {
     int result;
     char buffer[BUF_SIZE + 1];  /* stores received message */
 
-    result = recv(clientFD, buffer, BUF_SIZE, 0);
+    result = recv(clientFd, buffer, BUF_SIZE, 0);
 
     if (result < 0)
     {
@@ -242,12 +235,15 @@ int DoEcho(const int clientFD)
     }
     else if (0 == result)
     {
-        printf("Disconnected from socket %d.\n", clientFD);
+        printf("Socket %d disconnected.\n", clientFd);
     }
     else
     {
         /* echo: send back buffer */
-        if (result != send(clientFD, buffer, result, 0))
+        buffer[result] = '\0';
+        printf("Socket %d received %s", clientFd, buffer);
+
+        if (result != send(clientFd, buffer, result, 0))
         {
             /* send failed */
             perror("Error echoing message");

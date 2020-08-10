@@ -224,6 +224,6 @@ int DoEchoClient(const int socketFd)
         return 0;
     }
 
-    printf("Received:\n%s", buffer);
+    printf("Received: %s", buffer);
     return 1;
 }
