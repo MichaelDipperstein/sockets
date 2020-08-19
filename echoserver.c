@@ -50,11 +50,12 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <errno.h>
 
 #include <sys/socket.h>
 #include <arpa/inet.h>
 
-#include <sys/select.h>
+#include <poll.h>
 
 /***************************************************************************
 *                                CONSTANTS
@@ -63,9 +64,22 @@
 #define BUF_SIZE    1024        /* size of receive buffer */
 
 /***************************************************************************
+*                                 TYPES
+***************************************************************************/
+typedef struct fd_list_t
+{
+    int fd;
+    struct fd_list_t* next;
+} fd_list_t;
+
+/***************************************************************************
 *                               PROTOTYPES
 ***************************************************************************/
-int DoEcho(const int clientFd);
+int DoEcho(const int clientFd, const fd_list_t *list);
+
+int InsertFd(int fd, fd_list_t **list);
+int RemoveFd(int fd, fd_list_t **list);
+void PrintFdList(const fd_list_t *list);
 
 /***************************************************************************
 *                                FUNCTIONS
@@ -75,26 +89,28 @@ int DoEcho(const int clientFd);
 *   Function   : main
 *   Description: This is the main function for this program, it opens a TCP
 *                socket on the port specified in argv[1].  It accepts all
-*                connections to the specified port and echos back all
-*                received input.
+*                connections and maintains connections to the specified
+*                port.  If the connected socket may be read, DoEcho is
+*                called to handle receiving and echoing data.
 *   Parameters : argc - number of parameters
 *                argv - parameter list (argv[1] is port number)
 *   Effects    : A socket is open and accepts connections on the specified
-*                port.
+*                port.  Readable connections are passed to DoEcho
 *   Returned   : This function should never return
+*
+*   TODO: Add signalfd to handle ctrl-c and exit cleanly.
 ***************************************************************************/
 int main(int argc, char *argv[])
 {
     int result;
     int listenFd;   /* socket fd used to listen for connection requests */
 
+    struct fd_list_t* fdList, *thisFd;
+    struct pollfd *pfds;
+    int numFds, changed;
+
     /* structures for server and client internet addresses */
     struct sockaddr_in serverAddr;
-
-    /* sets of file descriptors for select functions */
-    fd_set fdActiveSet;     /* all active fds */
-    fd_set fdReadSet;       /* working set of fds */
-    int fdMax;              /* maximum file descriptor number */
 
     int i;
 
@@ -104,6 +120,8 @@ int main(int argc, char *argv[])
         fprintf(stderr, "Usage:  %s <port number>\n", argv[0]);
         exit(EXIT_FAILURE);
     }
+
+    fdList = NULL;
 
     /* create server socket descriptor */
     listenFd = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP);
@@ -142,68 +160,96 @@ int main(int argc, char *argv[])
         exit(EXIT_FAILURE);
     }
 
-    FD_ZERO(&fdActiveSet);              /* clear set of fds*/
-    FD_SET(listenFd, &fdActiveSet);     /* add server fd to the set */
-
-    fdMax = listenFd;   /* listenFd is the only fd, so it's the largest */
+    /* listenFd is our only fd when we start */
+    numFds = 1;
+    changed = 1;
+    pfds = NULL;
 
     /* service all sockets as needed */
     while (1)
     {
-        fdReadSet = fdActiveSet;
+        int startingFds = numFds;
 
-        /* block on select until something needs servicing */
-        if (select(fdMax+1, &fdReadSet, NULL, NULL, NULL) == -1)
+        if (changed)
         {
-            perror("Select failed");
+            /* one or more fds changed.  we need to change the polling struct */
+
+            if (NULL != pfds)
+            {
+                free(pfds);
+            }
+
+            pfds = (struct pollfd *)malloc(numFds * sizeof(struct pollfd));
+
+            if (NULL == pfds)
+            {
+                perror("Error allocating fds for poll");
+                break;
+            }
+
+            /* listen fd goes in slot 0, just because */
+            pfds[0].fd = listenFd;
+            pfds[0].events = POLLIN;
+
+            /* now poll for input from the rest of the sockets */
+            thisFd = fdList;
+            for(i = 1; i < numFds; i++)
+            {
+                pfds[i].fd = thisFd->fd;
+                pfds[i].events = POLLIN;
+                thisFd = thisFd->next;
+            }
+
+            changed = 0;
+        }
+
+        /* block on poll until something needs servicing */
+        if (-1 ==  poll(pfds, numFds, -1))
+        {
+            perror("Error poll failed");
             exit(EXIT_FAILURE);
         }
 
-        /* one or more fds need servicing.  start with max, it may change. */
-        for(i = 0; i <= fdMax; i++)
+        /* one or more fds need servicing */
+        if (pfds[0].revents & POLLIN)
         {
-            if (FD_ISSET(i, &fdReadSet))
+            /* listening socket we got a new connection request */
+            int acceptedFd;     /* fd for accepted connection */
+
+            /* accept the connection; we don't care about the address */
+            acceptedFd = accept(listenFd, NULL, NULL);
+
+            if (acceptedFd < 0)
             {
-                /* this fd needs servicing.  figure out which one it is. */
-                if (i == listenFd)
+                /* accept failed.  keep processing */
+                perror("Error accepting connections");
+            }
+            else
+            {
+                printf("New connection on socket %d.\n", acceptedFd);
+                InsertFd(acceptedFd, &fdList);
+                numFds++;
+                changed = 1;
+            }
+        }
+
+        for(i = 1; i < startingFds; i++)
+        {
+            /* one or more clients needs servicing */
+            if (pfds[i].revents & POLLIN)
+            {
+                /* service this client */
+                result = DoEcho(pfds[i].fd, fdList);
+
+                if (result <= 0)
                 {
-                    /* we got a new connection request */
-                    int acceptedFd;     /* fd for accepted connection */
-
-                    /* accept the connection; we don't care about the address */
-                    acceptedFd = accept(listenFd, NULL, NULL);
-
-                    if (acceptedFd < 0)
-                    {
-                        /* accept failed.  keep processing */
-                        perror("Error accepting connections");
-                    }
-                    else
-                    {
-                        /* add acceptedFd to set of fds*/
-                        FD_SET(acceptedFd, &fdActiveSet);
-
-                        if (acceptedFd > fdMax)
-                        {
-                            fdMax = acceptedFd;
-                        }
-
-                        printf("New connection on socket %d.\n", acceptedFd);
-                    }
+                    /* socket closed normally or failed */
+                    close(pfds[i].fd);
+                    RemoveFd(pfds[i].fd, &fdList);
+                    numFds--;
+                    changed = 1;
                 }
-                else
-                {
-                    /* one of the clients needs servicing */
-                    result = DoEcho(i);
-
-                    if (result <= 0)
-                    {
-                        /* socket closed normally or failed */
-                        close(i);
-                        FD_CLR(i, &fdActiveSet);
-                    }
-                }
-            }   /* end loop through fds */
+            }
         }
     }
 
@@ -211,21 +257,29 @@ int main(int argc, char *argv[])
     return EXIT_SUCCESS;    /* we should not get here */
 }
 
+
 /***************************************************************************
 *   Function   : DoEcho
 *   Description: This routine receives from a client's socket and then
-*                writes the received message back to the same socket.
+*                writes the received message back to each connected client
+*                socket.  The write is non-blocking, so clients with busy
+*                sockets will not receive the message.
 *   Parameters : clientFd - The socket descriptor for the socket to be read
-*                from and echoed to.
-*   Effects    : clientFd is read from and the values read are echoed back.
-*   Returned   : 0 for normal disconnect, < 0 for failure, otherwise the
-*                number of bytes read from the socket.
+*                from.
+*                list - a pointer to a list of fds for all connected sockets.
+*   Effects    : clientFd is read from.  If the read succeeds, the value
+*                that was read is sent to all client sockets.  The send will
+*                only succeed if the socket may be written to without
+*                blocking.
+*   Returned   : 0 for normal disconnect of clientFd, < 0 for failure,
+*                a positive value will be returned.
 ***************************************************************************/
-int DoEcho(const int clientFd)
+int DoEcho(const int clientFd, const fd_list_t *list)
 {
     int result;
     char buffer[BUF_SIZE + 1];  /* stores received message */
 
+    (void)list;
     result = recv(clientFd, buffer, BUF_SIZE, 0);
 
     if (result < 0)
@@ -239,16 +293,197 @@ int DoEcho(const int clientFd)
     }
     else
     {
-        /* echo: send back buffer */
+        const fd_list_t *here;
+
         buffer[result] = '\0';
         printf("Socket %d received %s", clientFd, buffer);
 
-        if (result != send(clientFd, buffer, result, 0))
+        /*******************************************************************
+        * echo the buffer to all connected sockets, skip if waiting
+        * is required.  Use threads or a complex polling loop if it's
+        * important that every socket receive the echo.
+        *******************************************************************/
+        here = list;
+
+        while (here != NULL)
         {
-            /* send failed */
-            perror("Error echoing message");
+            result = send(here->fd, buffer, result, MSG_DONTWAIT);
+
+            if (result == -1)
+            {
+                if ((EAGAIN == errno) || (EWOULDBLOCK == errno))
+                {
+                    fprintf(stderr, "Socket %d is busy\n", here->fd);
+                }
+                else
+                {
+                    /* send failed */
+                    fprintf(stderr, "Error echoing message to socket %d ",
+                        here->fd);
+                    perror("");
+                }
+            }
+
+            here = here->next;
         }
+
+        result = 1;     /* any echoing is success for this function */
     }
 
     return result;
+}
+
+
+/***************************************************************************
+*   Function   : InsertFd
+*   Description: This routine will traverse a linked list of file
+*                descriptors.  If it reaches the end of the list without
+*                finding the file descriptor passed a as parameter, it
+*                will insert a node for the new file descriptor at the end
+*                of the list.
+*   Parameters : fd - The socket descriptor to be inserted to the list.
+*                list - a pointer to a list of fds for all connected
+*                sockets.
+*   Effects    : A node for the fd is added to the end of the list of fds.
+*   Returned   : 0 for success, otherwise errno for the failure.
+*
+*   NOTE: If duplicates aren't an issue, it's faster to insert the new
+*         file descriptor to the head of the linked list.
+***************************************************************************/
+int InsertFd(int fd, fd_list_t **list)
+{
+    fd_list_t *here;
+
+    /* handle empty list */
+    if (NULL == *list)
+    {
+        *list = (fd_list_t *)malloc(sizeof(fd_list_t));
+
+        if (NULL == list)
+        {
+            perror("Error allocating fd_list_t");
+            return 1;
+        }
+
+        (*list)->fd = fd;
+        (*list)->next = NULL;
+        return 0;
+    }
+
+    /* find the end of the list */
+    here = *list;
+    while(here->next != NULL)
+    {
+        if (here->fd == fd)
+        {
+            fprintf(stderr, "Tried to insert fd that already exists: %d\n", fd);
+            return EEXIST;  /* is there a better errno? */
+        }
+
+        here = here->next;
+    }
+
+    /* we're at the end insert here */
+    here->next = (fd_list_t *)malloc(sizeof(fd_list_t));
+
+    if (NULL == here->next)
+    {
+        perror("Error allocating fd_list_t");
+        return errno;
+    }
+
+    here->next->fd = fd;
+    here->next->next = NULL;
+    return 0;
+}
+
+
+/***************************************************************************
+*   Function   : RemoveFd
+*   Description: This routine will traverse a linked list of file
+*                descriptors until it find a node for the file descriptor
+*                passed a as parameter.  Then it will remove that node from
+*                the list.  If the file descriptor is not found, ENOENT
+*                is returned.
+*   Parameters : fd - The socket descriptor to be deleted from the list.
+*                list - a pointer to a list of fds for all connected
+*                sockets.
+*   Effects    : The node for the fd is removed from the list of fds.
+*   Returned   : 0 for success, otherwise ENOENT for the failure.
+***************************************************************************/
+int RemoveFd(int fd, fd_list_t **list)
+{
+    fd_list_t *here, *prev;
+
+    if (NULL == *list)
+    {
+        return 0;
+    }
+
+    here = *list;
+    prev = NULL;
+
+    while (here != NULL)
+    {
+        if (here->fd == fd)
+        {
+            /* found it */
+            if (NULL == prev)
+            {
+                /* deleted the head */
+                *list = here->next;
+            }
+            else
+            {
+                prev->next = here->next;
+            }
+
+            free(here);
+            return 0;
+        }
+
+        prev = here;
+        here = here->next;
+    }
+
+    return ENOENT;
+}
+
+
+/***************************************************************************
+*   Function   : PrintFdList
+*   Description: This is a debugging routine for printing all of file
+*                descriptors in a file descriptor list.
+*   Parameters : list - a pointer to the head of an file descriptor list.
+*   Effects    : The values of all of the file descriptors in the list are
+*                written to stdout.
+*   Returned   : None.
+***************************************************************************/
+void PrintFdList(const fd_list_t *list)
+{
+    const fd_list_t *here;
+
+    if (NULL == list)
+    {
+        printf("No fds\n");
+        return;
+    }
+
+    here = list;
+
+    printf("fds: ");
+
+    while (here != NULL)
+    {
+        if (here->next != NULL)
+        {
+            printf("%d, ", here->fd);
+        }
+        else
+        {
+            printf("%d\n", here->fd);
+        }
+
+        here = here->next;
+    }
 }

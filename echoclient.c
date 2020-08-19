@@ -56,6 +56,8 @@
 
 #include <netdb.h>
 
+#include <poll.h>
+
 /***************************************************************************
 *                                CONSTANTS
 ***************************************************************************/
@@ -74,14 +76,16 @@ int DoEchoClient(const int socketFd);
 *   Function   : main
 *   Description: This is the main function for this program, it opens a TCP
 *                connection to the host specified in argv[1] on the port
-*                specified in argv[2].  Then it transmits the user entered
-*                messages and receives the echos until the user tries to
-*                send an empty message.
+*                specified in argv[2].  Then calls DoEchoClient to handle
+*                sending and receiving messages.
 *   Parameters : argc - number of parameters
-*                argv - parameter list (argv[1] is host name, argv[2] is port)
+*                argv - parameter list (argv[1] is host name, argv[2] is
+*                port)
 *   Effects    : A connection to is established with the echo server and
-*                messages are transmitted and received.
-*   Returned   : 0 for success, otherwise exits with EXIT_FAILURE.
+*                DoEchoClient is called to handle transmitting and
+*                receiving messages.
+*   Returned   : EXIT_SUCCESS for success, otherwise exits with
+*                EXIT_FAILURE.
 ***************************************************************************/
 int main(int argc, char **argv)
 {
@@ -165,65 +169,94 @@ int main(int argc, char **argv)
     printf("Connected to %s\n", p->ai_canonname);
     freeaddrinfo(servInfo);     /* we're done with this */
 
-    /* send and receive echo messages until user sends empty message */
-    while (DoEchoClient(socketFd));
+    /***********************************************************************
+    * send messages to echo server and receive echos until user sends empty
+    * message or the server disconnects.
+    ***********************************************************************/
+    DoEchoClient(socketFd);
 
     close(socketFd);
-    return 0;
+    return EXIT_SUCCESS;
 }
+
 
 /***************************************************************************
 *   Function   : DoEchoClient
-*   Description: This routine gets a message from stdin then writes to the
-*                server's socket, waits for a reply from the server, and
-*                writes it to stdout.  If an empty message is received from
-*                stdin, this routine will exit without transmitting it.
+*   Description: This routine contains the polling loop to handle sending
+*                and receiving of echo messages.  Message from stdin are
+*                written to the socket passed as a parameter.  Messages
+*                received from the socket passed as a parameter are written
+*                to stdout.  If an empty message is received from stdin,
+*                this routine will exit without transmitting it.  This
+*                routine will also exit if the server side of the socket
+*                is closed.
 *   Parameters : socketFd - The socket descriptor for the socket to be read
-*                from and echoed to.
-*   Effects    : stdin is read for a messages, which is sent to socketFd
-*                then the reply from socketFd is read and written to stdout.
-*   Returned   : 0 for empty message from stdin or closed socket,
-*                otherwise 1.
+*                from and written to.
+*   Effects    : stdin is read for messages, which are sent to socketFd.
+*                socketFd is read for messages, which are sent to stdout.
+*   Returned   : 0 for empty message from stdin or closed socket.
 ***************************************************************************/
 int DoEchoClient(const int socketFd)
 {
     int result;
     char buffer[BUF_SIZE + 1];  /* stores received message */
+    struct pollfd pfds[2];      /* file descriptors for polling */
 
-    /* get message line from the user */
-    printf("Enter message to send [empty message exits]:\n");
-    memset(&buffer, 0, sizeof(char) * BUF_SIZE);
-    fgets(buffer, BUF_SIZE, stdin);
+    printf("Enter messages to send [empty message exits]:\n");
 
-    if (strlen(buffer) <= 1)
+    /* enter a poll loop until empty message or server disconnects */
+    while (1)
     {
-        /* exit on empty message */
-        return 0;
+        /* stdin for user input */
+        pfds[0].fd = STDIN_FILENO;
+        pfds[0].events = POLLIN;
+
+        /* socket for input from echos */
+        pfds[1].fd = socketFd;
+        pfds[1].events = POLLIN;
+
+        result = poll(pfds, 2, -1);
+
+        if (pfds[0].revents &  POLLIN)
+        {
+            /* we can read the user's input to send */
+            fgets(buffer, BUF_SIZE, stdin);
+
+            if (strlen(buffer) <= 1)
+            {
+                /* exit on empty message */
+                break;
+            }
+
+            /* send the message line to the server (write is blocking) */
+            result = write(socketFd, buffer, strlen(buffer));
+
+            if (result != (int)strlen(buffer))
+            {
+                perror("Error sending message to server");
+            }
+        }
+
+        if (pfds[1].revents &  POLLIN)
+        {
+            /* get server's echo */
+            result = read(socketFd, buffer, BUF_SIZE);
+
+            if (result < 0)
+            {
+                perror("Error receiving echo");
+            }
+            else if (0 == result)
+            {
+                /* the server side of the */
+                printf("Server closed connection.  Exiting ...\n");
+                break;
+            }
+
+            buffer[result] = '\0';
+            printf("Received: %s", buffer);
+        }
     }
 
-    /* send the message line to the server */
-    result = write(socketFd, buffer, strlen(buffer));
-
-    if (result != (int)strlen(buffer))
-    {
-        perror("Error sending message to server");
-    }
-
-    /* print the server's reply */
-    memset(&buffer, 0, sizeof(char) * BUF_SIZE);
-    result = read(socketFd, buffer, BUF_SIZE);
-
-    if (result < 0)
-    {
-        perror("Error receiving echo");
-    }
-    else if (0 == result)
-    {
-        /* the server side of the */
-        printf("Server closed connection.  Exiting ...\n");
-        return 0;
-    }
-
-    printf("Received: %s", buffer);
-    return 1;
+    return 0;
 }
