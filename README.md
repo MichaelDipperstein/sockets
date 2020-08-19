@@ -17,11 +17,11 @@ https://michaeldipperstein.github.io/sockets.html
 File Name | Contents
 --- | ---
 echoclient.c | TCP/IP echo client example using `getaddrinfo()` to find the server address
-echoserver.c | TCP/IP echo server example with `select()` loop
+echoserver.c | TCP/IP echo server example with `poll()` loop
 echoclient_udp.c | UDP/IP echo client example using `getaddrinfo()` to find the server address
 echoserver_udp.c | UDP/IP echo server example
 Makefile | makefile for this project (assumes gcc compiler and GNU make)
-README.MD | this file
+README.MD | This file
 
 ## Building
 To build these files with GNU make and gcc:
@@ -49,10 +49,21 @@ Hit `Enter` on a blank line to exit from an `echoclient`.
 Multiple `echoclient`s may connect to a single `echoserver` instance.
 
 ## History
-12/27/17  - Initial release<br/>
-12/30/17  - Added UDP client and server examples<br/>
-08/08/20  - Added polling and signal handling to allow UDP examples
-            to exit cleanly when waiting to receive data
+12/27/17
+* Initial release
+
+12/30/17
+* Added UDP client and server examples
+
+08/08/20
+* Added polling and signal handling to allow UDP examples to exit cleanly when
+waiting to receive data
+
+08/18/20
+* Rewrote TCP code so that the `echoserver` will echo a message will be
+echoed to every connected `echoclient`.
+* TCP `echoserver` no actively tracks all connected `echoclient` sockets.
+* Replaced `select()` loop with `poll()` loop in TCP code.
 
 ## TODO
 - Send and receive messages of any size
