@@ -66,8 +66,7 @@
 /***************************************************************************
 *                               PROTOTYPES
 ***************************************************************************/
-int DoEchoClient(const int socketFd, struct sockaddr *serverAddr,
-    const unsigned int addrLen);
+int DoEchoClient(const int socketFd, const struct sockaddr_in *serverAddr);
 
 /***************************************************************************
 *                                FUNCTIONS
@@ -91,14 +90,12 @@ int main(int argc, char **argv)
     int result;
     int socketFd;               /* UDP socket descriptor */
 
-    /* structure containing the server's internet address */
-    struct sockaddr *serverAddr;
-    unsigned int addrLen;           /* size of struct sockaddr */
-
     /* structures for use with getaddrinfo() */
     struct addrinfo hints;      /* hints for getaddrinfo() */
-    struct addrinfo *servInfo;  /* list of info returned by getaddrinfo() */
-    struct addrinfo *p;         /* pointer for iterating list in servInfo */
+    struct addrinfo *info;      /* list of info returned by getaddrinfo() */
+    struct addrinfo *p;         /* pointer for iterating list in info */
+
+    struct sockaddr_in serverAddr;  /* the address of the server for sendto */
 
     /* argv[1] is host name or address, argv[2] is port number,
      * make sure we have them */
@@ -110,16 +107,14 @@ int main(int argc, char **argv)
         exit(EXIT_FAILURE);
     }
 
+    /* indicate that we want ipv4 udp datagrams */
     memset(&hints, 0, sizeof(hints));
-
-    /* type of server we're looking for */
     hints.ai_family = AF_INET;          /* internet address family */
     hints.ai_socktype = SOCK_DGRAM;     /* datagram sock */
     hints.ai_protocol = IPPROTO_UDP;    /* udp/ip protocol */
-    hints.ai_flags = AI_CANONNAME;      /* include canonical name */
 
-    /* get a linked list of likely servers pointed to by servInfo */
-    result = getaddrinfo(argv[1], argv[2], &hints, &servInfo);
+    /* get a linked list of likely servers pointed to by info */
+    result = getaddrinfo(argv[1], argv[2], &hints, &info);
 
     if (result != 0)
     {
@@ -128,7 +123,7 @@ int main(int argc, char **argv)
     }
 
     printf("Trying %s...\n", argv[1]);
-    p = servInfo;
+    p = info;
 
     while (p != NULL)
     {
@@ -148,21 +143,18 @@ int main(int argc, char **argv)
     {
         /* we never found a server to connect to */
         fprintf(stderr, "Unable to connect to server\n.");
-        freeaddrinfo(servInfo);
+        freeaddrinfo(info);
         exit(EXIT_FAILURE);
     }
 
-    /* copy the server address that we created a socket for */
-    addrLen = p->ai_addrlen;
-    serverAddr = (struct sockaddr *)malloc(addrLen);
-    memcpy(serverAddr, p->ai_addr, addrLen);
-
-    freeaddrinfo(servInfo);     /* we're done with servInfo */
+    /* make a copy of the server address, so we can send messages to it */
+    memset(&serverAddr, 0, sizeof(serverAddr));
+    memcpy(&serverAddr, p->ai_addr, p->ai_addrlen);
+    freeaddrinfo(info);
 
     /* send and receive echo messages until user sends empty message */
-    DoEchoClient(socketFd, serverAddr, addrLen);
+    DoEchoClient(socketFd, &serverAddr);
 
-    free(serverAddr);
     close(socketFd);
     return 0;
 }
@@ -175,14 +167,17 @@ int main(int argc, char **argv)
 *                received from stdin, or an error occurs.
 *                stdin, this routine will exit without transmitting it.
 *   Parameters : socketFd - The socket descriptor for the socket to be read
-*                from and echoed to.
-*   Effects    : stdin is read for a messages, which is sent to socketFd
-*                then the reply from socketFd is read and written to stdout.
+*                from and echoed to.  It must be bound to the server
+*                address.
+*                serverAddr - pointer to the Internet address struct for
+*                the echo server.
+*   Effects    : stdin is read for messages, which are sent to socketFd.
+*                Echoed messages from socketFd are read and written to
+*                stdout.
 *   Returned   : 0 for successful operation, otherwise the error from recv,
 *               sendto, or fgets will be returned.
 ***************************************************************************/
-int DoEchoClient(const int socketFd, struct sockaddr *serverAddr,
-    const unsigned int addrLen)
+int DoEchoClient(const int socketFd, const struct sockaddr_in *serverAddr)
 {
     int result;
     char buffer[BUF_SIZE + 1];  /* stores received message */
@@ -238,7 +233,8 @@ int DoEchoClient(const int socketFd, struct sockaddr *serverAddr,
 
             /* send the message line to the server */
             result = sendto(socketFd, buffer, strlen(buffer), 0,
-                serverAddr, addrLen);
+                (const struct sockaddr *)serverAddr,
+                sizeof(struct sockaddr_in));
 
             if (result < 0)
             {
