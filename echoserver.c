@@ -105,7 +105,7 @@ int main(int argc, char *argv[])
     int result;
     int listenFd;   /* socket fd used to listen for connection requests */
 
-    struct fd_list_t* fdList, *thisFd;
+    struct fd_list_t *fdList, *thisFd;
     struct pollfd *pfds;
     int numFds, changed;
 
@@ -362,7 +362,7 @@ int InsertFd(int fd, fd_list_t **list)
         if (NULL == list)
         {
             perror("Error allocating fd_list_t");
-            return 1;
+            return errno;
         }
 
         (*list)->fd = fd;
@@ -383,7 +383,14 @@ int InsertFd(int fd, fd_list_t **list)
         here = here->next;
     }
 
-    /* we're at the end insert here */
+    /* we're at the end make sure that fd isn't already here */
+    if (here->fd == fd)
+    {
+        fprintf(stderr, "Tried to insert fd that already exists: %d\n", fd);
+        return EEXIST;  /* is there a better errno? */
+    }
+
+    /* add new fd to list */
     here->next = (fd_list_t *)malloc(sizeof(fd_list_t));
 
     if (NULL == here->next)
@@ -401,7 +408,7 @@ int InsertFd(int fd, fd_list_t **list)
 /***************************************************************************
 *   Function   : RemoveFd
 *   Description: This routine will traverse a linked list of file
-*                descriptors until it find a node for the file descriptor
+*                descriptors until it finds a node for the file descriptor
 *                passed a as parameter.  Then it will remove that node from
 *                the list.  If the file descriptor is not found, ENOENT
 *                is returned.
