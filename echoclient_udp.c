@@ -211,7 +211,8 @@ int DoEchoClient(const int socketFd, const struct sockaddr_in *serverAddr)
             }
             else
             {
-                printf("Received: %s", buffer);
+                printf("Received bytes: %s\n", buffer);
+                memset(buffer, 0, strlen(buffer));  /* clear buffer for reuse */
             }
         }
 
@@ -225,14 +226,12 @@ int DoEchoClient(const int socketFd, const struct sockaddr_in *serverAddr)
                 result = ferror(stdin);
                 break;
             }
-            else if (strlen(buffer) == 1)
-            {
-                /* this is a carriage return.  make it truely empty */
-                buffer[0] = '\0';
-            }
+
+            /* strip off the trailing carriage return */
+            buffer[strlen(buffer) - 1] = '\0';
 
             /* send the message line to the server */
-            result = sendto(socketFd, buffer, strlen(buffer), 0,
+            result = sendto(socketFd, buffer, strlen(buffer) + 1, 0,
                 (const struct sockaddr *)serverAddr,
                 sizeof(struct sockaddr_in));
 
@@ -243,7 +242,7 @@ int DoEchoClient(const int socketFd, const struct sockaddr_in *serverAddr)
                 break;
             }
 
-            if (strlen(buffer) == 0)
+            if (buffer[0] == '\0')
             {
                 /* exit on empty message */
                 result = 0;
@@ -251,7 +250,8 @@ int DoEchoClient(const int socketFd, const struct sockaddr_in *serverAddr)
             }
             else
             {
-                /* get next message line from the user */
+                /* clear the buffer and prompt for new message to echo */
+                memset(buffer, 0, strlen(buffer));
                 printf("Enter message to send [empty message exits]:\n");
             }
         }

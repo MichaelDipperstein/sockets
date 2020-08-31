@@ -3,7 +3,7 @@
 ## Description
 This archive contains C source code sample implementations of clients and
 servers using Berkeley Socket.  Most of the source code evolved from code that
-I original wrote back in 1990.  Every few years I was using it as a reference
+I originally wrote back in 1990.  Every few years I was using it as a reference
 and updating it to replace obsolete functions with modern functions.  I've
 placed the resulting code on github so that I could find it and access it from
 just about anywhere.
@@ -62,8 +62,17 @@ waiting to receive data
 08/18/20
 * Rewrote TCP code so that the `echoserver` will echo a message will be
 echoed to every connected `echoclient`.
-* TCP `echoserver` no actively tracks all connected `echoclient` sockets.
+* TCP `echoserver` now actively tracks all connected `echoclient` sockets.
 * Replaced `select()` loop with `poll()` loop in TCP code.
+
+08/30/20
+* Rewrote UDP code so that the `echoserver` will echo a message will be
+echoed to every connected `echoclient`.
+* UDP `echoserver` now actively tracks all `echoclient` socket addresses.
+  * Address is obtained when client sends its first message.
+  * Address is released when the client sends and empty message.
+* Replaced `select()` loop with `poll()` loop in USP code.
+
 
 ## TODO
 - Send and receive messages of any size
