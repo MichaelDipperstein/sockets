@@ -10,7 +10,7 @@ just about anywhere.
 
 These files are released under the BSD License.
 
-More information on BSD sockets and this echo server implementation  may be
+More information on Berkeley sockets and this echo server implementation  may be
 found at: https://michaeldipperstein.github.io/sockets.html
 
 ## Files
