@@ -10,8 +10,8 @@ just about anywhere.
 
 These files are released under the BSD License.
 
-More information on run length encoding may be found at:
-https://michaeldipperstein.github.io/sockets.html
+More information on BSD sockets and this echo server implementation  may be
+found at: https://michaeldipperstein.github.io/sockets.html
 
 ## Files
 File Name | Contents
